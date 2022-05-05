@@ -1,0 +1,742 @@
+--- a/cryptoapi/v2.0/nss_cryptoapi_private.h
++++ b/cryptoapi/v2.0/nss_cryptoapi_private.h
+@@ -248,12 +248,25 @@ extern void nss_cryptoapi_aead_tx_proc(s
+ /*
+  * ABLKCIPHER
+  */
++/*
+ extern int nss_cryptoapi_ablkcipher_init(struct crypto_tfm *tfm);
+ extern void nss_cryptoapi_ablkcipher_exit(struct crypto_tfm *tfm);
+ extern int nss_cryptoapi_ablk_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int len);
+ extern int nss_cryptoapi_ablk_encrypt(struct ablkcipher_request *req);
+ extern int nss_cryptoapi_ablk_decrypt(struct ablkcipher_request *req);
+ extern void nss_cryptoapi_copy_iv(struct nss_cryptoapi_ctx *ctx, struct scatterlist *sg, uint8_t *iv, uint8_t iv_len);
++ */
++
++/*
++ * SKCIPHER
++ */
++extern int nss_cryptoapi_skcipher_init(struct crypto_skcipher *tfm);
++extern void nss_cryptoapi_skcipher_exit(struct crypto_skcipher *tfm);
++extern int nss_cryptoapi_skc_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int len);
++extern int nss_cryptoapi_skc_encrypt(struct skcipher_request *req);
++extern int nss_cryptoapi_skc_decrypt(struct skcipher_request *req);
++extern void nss_cryptoapi_copy_iv(struct nss_cryptoapi_ctx *ctx, struct scatterlist *sg, uint8_t *iv, uint8_t iv_len);
++
+ 
+ /*
+  * AHASH
+--- a/cryptoapi/v2.0/nss_cryptoapi_ablk.c
++++ b/cryptoapi/v2.0/nss_cryptoapi_ablk.c
+@@ -67,8 +67,10 @@ extern struct nss_cryptoapi g_cryptoapi;
+ int nss_cryptoapi_skcipher_ctx2session(struct crypto_skcipher *sk, uint32_t *sid)
+ {
+ 	struct crypto_tfm *tfm = crypto_skcipher_tfm(sk);
+-	struct crypto_ablkcipher **actx, *ablk;
+-	struct ablkcipher_tfm *ablk_tfm;
++	//struct crypto_ablkcipher **actx, *ablk;
++	struct crypto_skcipher **actx;//, *ablk;
++	//struct ablkcipher_tfm *ablk_tfm;
++	struct crypto_tfm *ablk_tfm;
+ 	struct nss_cryptoapi_ctx *ctx;
+ 
+ 	if (strncmp("nss-", crypto_tfm_alg_driver_name(tfm), 4))
+@@ -84,16 +86,18 @@ int nss_cryptoapi_skcipher_ctx2session(s
+ 	 * ablkcipher that is created when the skcipher is created.
+ 	 * Hence we derive the required ablkcipher through ablkcipher_tfm.
+ 	 */
+-	ablk_tfm = crypto_ablkcipher_crt(*actx);
++	//ablk_tfm = crypto_ablkcipher_crt(*actx);
++	ablk_tfm = crypto_skcipher_tfm(*actx);
+ 	if (!ablk_tfm)
+ 		return -EINVAL;
+ 
+-	ablk = ablk_tfm->base;
++	/* ablk = ablk_tfm->base;
+ 	if (!ablk)
+-		return -EINVAL;
++		return -EINVAL; */
+ 
+ 	/* Get the nss_cryptoapi context stored in the ablkcipher */
+-	ctx = crypto_ablkcipher_ctx(ablk);
++	//ctx = crypto_ablkcipher_ctx(ablk);
++	ctx = crypto_skcipher_ctx(sk);
+ 
+ 	BUG_ON(!ctx);
+ 	NSS_CRYPTOAPI_VERIFY_MAGIC(ctx);
+@@ -107,6 +111,11 @@ EXPORT_SYMBOL(nss_cryptoapi_skcipher_ctx
+  * nss_cryptoapi_ablkcipher_init()
+  * 	Cryptoapi ablkcipher init function.
+  */
++/*
++ * nss_cryptoapi_skcipher_init()
++ * 	Cryptoapi skcipher init function.
++ */
++/*
+ int nss_cryptoapi_ablkcipher_init(struct crypto_tfm *tfm)
+ {
+ 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
+@@ -122,15 +131,36 @@ int nss_cryptoapi_ablkcipher_init(struct
+ 	init_completion(&ctx->complete);
+ 
+ 	return 0;
++} */
++int nss_cryptoapi_skcipher_init(struct crypto_skcipher *tfm)
++{
++	struct nss_cryptoapi_ctx *ctx = crypto_skcipher_ctx(tfm);
++
++	BUG_ON(!ctx);
++	NSS_CRYPTOAPI_SET_MAGIC(ctx);
++
++	memset(ctx, 0, sizeof(struct nss_cryptoapi_ctx));
++
++	ctx->user = g_cryptoapi.user;
++	ctx->stats.init++;
++	ctx->sid = NSS_CRYPTO_SESSION_MAX;
++	init_completion(&ctx->complete);
++
++	return 0;
+ }
+ 
++
+ /*
+  * nss_cryptoapi_ablkcipher_exit()
+  * 	Cryptoapi ablkcipher exit function.
+  */
+-void nss_cryptoapi_ablkcipher_exit(struct crypto_tfm *tfm)
++/*
++ * nss_cryptoapi_skcipher_exit()
++ * 	Cryptoapi skcipher exit function.
++ */
++void nss_cryptoapi_skcipher_exit(struct crypto_skcipher *tfm)
+ {
+-	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
++	struct nss_cryptoapi_ctx *ctx = crypto_skcipher_ctx(tfm);
+ 	int ret;
+ 
+ 	BUG_ON(!ctx);
+@@ -180,9 +210,14 @@ void nss_cryptoapi_ablkcipher_exit(struc
+  * nss_cryptoapi_ablk_setkey()
+  * 	Cryptoapi setkey routine for aes.
+  */
+-int nss_cryptoapi_ablk_setkey(struct crypto_ablkcipher *cipher, const u8 *key, unsigned int keylen)
++/*
++ * nss_cryptoapi_skc_setkey()
++ * 	Cryptoapi setkey routine for aes.
++ */
++
++int nss_cryptoapi_skc_setkey(struct crypto_skcipher *cipher, const u8 *key, unsigned int keylen)
+ {
+-	struct crypto_tfm *tfm = crypto_ablkcipher_tfm(cipher);
++	struct crypto_tfm *tfm = crypto_skcipher_tfm(cipher);
+ 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(tfm);
+ 	struct nss_crypto_session_data data = {0};
+ 	int status;
+@@ -194,11 +229,12 @@ int nss_cryptoapi_ablk_setkey(struct cry
+ 
+ 	ctx->info = nss_cryptoapi_cra_name2info(crypto_tfm_alg_name(tfm), keylen, 0);
+ 	if (!ctx->info) {
+-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -EINVAL;
+ 	}
+ 
+-	ctx->iv_size = crypto_ablkcipher_ivsize(cipher);
++	//ctx->iv_size = crypto_ablkcipher_ivsize(cipher);
++	ctx->iv_size = crypto_skcipher_ivsize(cipher);
+ 
+ 	if (ctx->info->cipher_mode == NSS_CRYPTOAPI_CIPHER_MODE_CTR_RFC3686) {
+ 		keylen = keylen - CTR_RFC3686_NONCE_SIZE;
+@@ -225,7 +261,7 @@ int nss_cryptoapi_ablk_setkey(struct cry
+ 	status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
+ 	if (status < 0) {
+ 		nss_cfi_err("%px: Unable to allocate crypto session(%d)\n", ctx, status);
+-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_FLAGS);
++		//crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_FLAGS);
+ 		return status;
+ 	}
+ 
+@@ -239,9 +275,14 @@ int nss_cryptoapi_ablk_setkey(struct cry
+  * nss_cryptoapi_ablkcipher_done()
+  * 	Cipher operation completion callback function
+  */
+-void nss_cryptoapi_ablkcipher_done(void *app_data, struct nss_crypto_hdr *ch, uint8_t status)
++/*
++ * nss_cryptoapi_skcipher_done()
++ * 	Cipher operation completion callback function
++ */
++
++void nss_cryptoapi_skcipher_done(void *app_data, struct nss_crypto_hdr *ch, uint8_t status)
+ {
+-	struct ablkcipher_request *req = app_data;
++	struct skcipher_request *req = app_data;
+ 	struct nss_cryptoapi_ctx *ctx = crypto_tfm_ctx(req->base.tfm);
+ 	int error;
+ 
+@@ -257,7 +298,8 @@ void nss_cryptoapi_ablkcipher_done(void
+ 	 * an IV for the next data
+ 	 */
+ 	if (ch->op == NSS_CRYPTO_OP_DIR_ENC) {
+-		nss_cryptoapi_copy_iv(ctx, req->dst, req->info, ch->iv_len);
++		//nss_cryptoapi_copy_iv(ctx, req->dst, req->info, ch->iv_len);
++		nss_cryptoapi_copy_iv(ctx, req->dst, req->iv, ch->iv_len);
+ 	}
+ 
+ 	/*
+@@ -266,7 +308,7 @@ void nss_cryptoapi_ablkcipher_done(void
+ 	nss_crypto_hdr_free(ctx->user, ch);
+ 
+ 	nss_cfi_dbg("data dump after transformation\n");
+-	nss_cfi_dbg_data(sg_virt(req->dst), req->nbytes, ' ');
++	nss_cfi_dbg_data(sg_virt(req->dst), req->cryptlen, ' ');
+ 
+ 	/*
+ 	 * Check if there is any error reported by hardware
+@@ -285,11 +327,13 @@ void nss_cryptoapi_ablkcipher_done(void
+  * nss_cryptoapi_ablk_encrypt()
+  * 	Crytoapi encrypt for AES and 3DES algorithms.
+  */
+-int nss_cryptoapi_ablk_encrypt(struct ablkcipher_request *req)
++//int nss_cryptoapi_ablk_encrypt(struct ablkcipher_request *req)
++int nss_cryptoapi_skc_encrypt(struct skcipher_request *req)
+ {
+ 	struct nss_cryptoapi_info info = {.op_dir = NSS_CRYPTO_OP_DIR_ENC};
+-	struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
+-	struct nss_cryptoapi_ctx *ctx = crypto_ablkcipher_ctx(cipher);
++	//struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
++	struct crypto_skcipher *cipher = crypto_skcipher_reqtfm(req);
++	struct nss_cryptoapi_ctx *ctx = crypto_skcipher_ctx(cipher);
+ 	struct crypto_tfm *tfm = req->base.tfm;
+ 	struct scatterlist *cur;
+ 	int tot_len = 0;
+@@ -315,33 +359,33 @@ int nss_cryptoapi_ablk_encrypt(struct ab
+ 	 * Block size not aligned.
+ 	 * AES-CTR requires only a one-byte block size alignment.
+ 	 */
+-	if (!IS_ALIGNED(req->nbytes, crypto_tfm_alg_blocksize(tfm)) && ctx->info->blk_align) {
++	if (!IS_ALIGNED(req->cryptlen, crypto_tfm_alg_blocksize(tfm)) && ctx->info->blk_align) {
+ 		ctx->stats.failed_align++;
+-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
++		//crypto_skcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
+ 		return -EFAULT;
+ 	}
+ 
+ 	/*
+ 	 * Fill the request information structure
+ 	 */
+-	info.iv = req->info;
++	info.iv = req->iv;
+ 	info.src.nsegs = sg_nents(req->src);
+ 	info.dst.nsegs = sg_nents(req->dst);
+ 	info.op_dir = NSS_CRYPTO_OP_DIR_ENC;
+-	info.cb = nss_cryptoapi_ablkcipher_done;
++	info.cb = nss_cryptoapi_skcipher_done;
+ 	info.iv_size = ctx->iv_size;
+ 	info.src.first_sg = req->src;
+ 	info.dst.first_sg = req->dst;
+ 	info.dst.last_sg = sg_last(req->dst, info.dst.nsegs);
+ 
+ 	/* out and in length will be same as ablk does only encrypt/decryt operation */
+-	info.total_in_len = info.total_out_len = req->nbytes;
++	info.total_in_len = info.total_out_len = req->cryptlen;
+ 	info.in_place = (req->src == req->dst) ? true : false;
+ 
+ 	/*
+ 	 * The exact length of data that needs to be ciphered for an ABLK
+-	 * request is stored in req->nbytes. Hence we may have to reduce
+-	 * the DMA length to what is specified in req->nbytes and later
++	 * request is stored in req->cryptlen. Hence we may have to reduce
++	 * the DMA length to what is specified in req->cryptlen and later
+ 	 * restore the length of scatterlist back to its original value.
+ 	 */
+ 	for_each_sg(req->src, cur, info.src.nsegs, i) {
+@@ -354,7 +398,7 @@ int nss_cryptoapi_ablk_encrypt(struct ab
+ 	}
+ 
+ 	info.src.last_sg = cur;
+-	info.ahash_skip = tot_len - req->nbytes;
++	info.ahash_skip = tot_len - req->cryptlen;
+ 
+ 	if (!atomic_inc_not_zero(&ctx->refcnt))
+ 		return -ENOENT;
+@@ -366,11 +410,13 @@ int nss_cryptoapi_ablk_encrypt(struct ab
+  * nss_cryptoapi_ablk_decrypt()
+  * 	Crytoapi decrypt for AES and 3DES CBC algorithms.
+  */
+-int nss_cryptoapi_ablk_decrypt(struct ablkcipher_request *req)
++int nss_cryptoapi_skc_decrypt(struct skcipher_request *req)
+ {
+ 	struct nss_cryptoapi_info info = {.op_dir = NSS_CRYPTO_OP_DIR_DEC};
+-	struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
+-	struct nss_cryptoapi_ctx *ctx = crypto_ablkcipher_ctx(cipher);
++	//struct crypto_ablkcipher *cipher = crypto_ablkcipher_reqtfm(req);
++	//struct crypto_alg *cipher = crypto_skcipher_reqtfm(req);
++	struct crypto_skcipher *cipher = crypto_skcipher_reqtfm(req);
++	struct nss_cryptoapi_ctx *ctx = crypto_skcipher_ctx(cipher);
+ 	struct crypto_tfm *tfm = req->base.tfm;
+ 	struct scatterlist *cur;
+ 	int tot_len = 0;
+@@ -395,9 +441,9 @@ int nss_cryptoapi_ablk_decrypt(struct ab
+ 	/*
+ 	 * Block size not aligned
+ 	 */
+-	if (!IS_ALIGNED(req->nbytes, crypto_tfm_alg_blocksize(tfm)) && ctx->info->blk_align) {
++	if (!IS_ALIGNED(req->cryptlen, crypto_tfm_alg_blocksize(tfm)) && ctx->info->blk_align) {
+ 		ctx->stats.failed_align++;
+-		crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
++		//crypto_ablkcipher_set_flags(cipher, CRYPTO_TFM_RES_BAD_BLOCK_LEN);
+ 		return -EFAULT;
+ 	}
+ 
+@@ -410,24 +456,24 @@ int nss_cryptoapi_ablk_decrypt(struct ab
+ 	 * - 8 bytes of IV
+ 	 * - 4 bytes of initial counter
+ 	 */
+-	info.iv = req->info;
++	info.iv = req->iv;
+ 	info.src.nsegs = sg_nents(req->src);
+ 	info.dst.nsegs = sg_nents(req->dst);
+ 	info.iv_size = ctx->iv_size;
+ 	info.op_dir = NSS_CRYPTO_OP_DIR_DEC;
+-	info.cb = nss_cryptoapi_ablkcipher_done;
++	info.cb = nss_cryptoapi_skcipher_done;
+ 	info.src.first_sg = req->src;
+ 	info.dst.first_sg = req->dst;
+ 	info.dst.last_sg = sg_last(req->dst, info.dst.nsegs);
+ 
+ 	/* out and in length will be same as ablk does only encrypt/decryt operation */
+-	info.total_in_len = info.total_out_len = req->nbytes;
++	info.total_in_len = info.total_out_len = req->cryptlen;
+ 	info.in_place = (req->src == req->dst) ? true : false;
+ 
+ 	/*
+ 	 * The exact length of data that needs to be ciphered for an ABLK
+-	 * request is stored in req->nbytes. Hence we may have to reduce
+-	 * the DMA length to what is specified in req->nbytes and later
++	 * request is stored in req->cryptlen. Hence we may have to reduce
++	 * the DMA length to what is specified in req->cryptlen and later
+ 	 * restore the length of scatterlist back to its original value.
+ 	 */
+ 	for_each_sg(req->src, cur, info.src.nsegs, i) {
+@@ -436,7 +482,7 @@ int nss_cryptoapi_ablk_decrypt(struct ab
+ 			break;
+ 	}
+ 
+-	info.ahash_skip = tot_len - req->nbytes;
++	info.ahash_skip = tot_len - req->cryptlen;
+ 	info.src.last_sg = cur;
+ 
+ 	if (!atomic_inc_not_zero(&ctx->refcnt))
+--- a/cryptoapi/v2.0/nss_cryptoapi.c
++++ b/cryptoapi/v2.0/nss_cryptoapi.c
+@@ -1366,8 +1366,30 @@ struct aead_alg cryptoapi_aead_algs[] =
+ /*
+  * ABLK cipher algorithms
+  */
+-static struct crypto_alg cryptoapi_ablkcipher_algs[] = {
++//static struct crypto_alg cryptoapi_ablkcipher_algs[] = {
++static struct skcipher_alg cryptoapi_skcipher_algs[] = {
+ 	{
++		.base = {
++			.cra_name = "cbc(aes)",
++			.cra_driver_name = "nss-cbc-aes",
++			.cra_priority = 10000,
++			.cra_flags = CRYPTO_ALG_ASYNC,
++			.cra_blocksize = AES_BLOCK_SIZE,
++			.cra_ctxsize = sizeof(struct nss_cryptoapi_ctx),
++			.cra_alignmask = 0,
++			//.cra_type = &crypto_ablkcipher_type,
++			.cra_module = THIS_MODULE,
++		},
++		.init = nss_cryptoapi_skcipher_init,
++		.exit = nss_cryptoapi_skcipher_exit,
++		.ivsize = AES_BLOCK_SIZE,
++		.min_keysize = AES_MIN_KEY_SIZE,
++		.max_keysize = AES_MAX_KEY_SIZE,
++		.setkey = nss_cryptoapi_skc_setkey,
++		.encrypt = nss_cryptoapi_skc_encrypt,
++		.decrypt = nss_cryptoapi_skc_decrypt,
++	},
++/*
+ 		.cra_name = "cbc(aes)",
+ 		.cra_driver_name = "nss-cbc-aes",
+ 		.cra_priority = 10000,
+@@ -1389,7 +1411,29 @@ static struct crypto_alg cryptoapi_ablkc
+ 				.decrypt = nss_cryptoapi_ablk_decrypt,
+ 			},
+ 		},
++	}, */
++
++	{
++		.base = {
++			.cra_name = "rfc3686(ctr(aes))",
++			.cra_driver_name = "nss-rfc3686-ctr-aes",
++			.cra_priority = 30000,
++			.cra_flags = CRYPTO_ALG_ASYNC,
++			.cra_blocksize = AES_BLOCK_SIZE,
++			.cra_ctxsize = sizeof(struct nss_cryptoapi_ctx),
++			.cra_alignmask = 0,
++			.cra_module = THIS_MODULE,
++		},
++		.init = nss_cryptoapi_skcipher_init,
++		.exit = nss_cryptoapi_skcipher_exit,
++		.ivsize = CTR_RFC3686_IV_SIZE,
++		.min_keysize = AES_MIN_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
++		.max_keysize = AES_MAX_KEY_SIZE + CTR_RFC3686_NONCE_SIZE,
++		.setkey = nss_cryptoapi_skc_setkey,
++		.encrypt = nss_cryptoapi_skc_encrypt,
++		.decrypt = nss_cryptoapi_skc_decrypt,
+ 	},
++	/*
+ 	{
+ 		.cra_name       = "rfc3686(ctr(aes))",
+ 		.cra_driver_name = "nss-rfc3686-ctr-aes",
+@@ -1405,9 +1449,11 @@ static struct crypto_alg cryptoapi_ablkc
+ 		.cra_u          = {
+ 			.ablkcipher = {
+ 				.ivsize         = CTR_RFC3686_IV_SIZE,
++*/
+ /*
+  * geniv deprecated from kernel version 5.0 and above
+  */
++/*
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0))
+ 				.geniv          = "seqiv",
+ #endif
+@@ -1419,6 +1465,8 @@ static struct crypto_alg cryptoapi_ablkc
+ 			},
+ 		},
+ 	},
++*/
++/*
+ 	{
+ 		.cra_name = "ecb(aes)",
+ 		.cra_driver_name = "nss-ecb-aes",
+@@ -1441,6 +1489,28 @@ static struct crypto_alg cryptoapi_ablkc
+ 			},
+ 		},
+ 	},
++	*/
++	{
++		.base = {
++			.cra_name = "ecb(aes)",
++			.cra_driver_name = "nss-ecb-aes",
++			.cra_priority = 10000,
++			.cra_flags = CRYPTO_ALG_ASYNC,
++			.cra_blocksize = AES_BLOCK_SIZE,
++			.cra_ctxsize = sizeof(struct nss_cryptoapi_ctx),
++			.cra_alignmask = 0,
++			//.cra_type = &crypto_ablkcipher_type,
++			.cra_module = THIS_MODULE,
++		},
++		.init = nss_cryptoapi_skcipher_init,
++		.exit = nss_cryptoapi_skcipher_exit,
++		.min_keysize = AES_MIN_KEY_SIZE,
++		.max_keysize = AES_MAX_KEY_SIZE,
++		.setkey = nss_cryptoapi_skc_setkey,
++		.encrypt = nss_cryptoapi_skc_encrypt,
++		.decrypt = nss_cryptoapi_skc_decrypt,
++	},
++	/*
+ 	{
+ 		.cra_name = "cbc(des3_ede)",
+ 		.cra_driver_name = "nss-cbc-des-ede",
+@@ -1463,6 +1533,27 @@ static struct crypto_alg cryptoapi_ablkc
+ 				.decrypt = nss_cryptoapi_ablk_decrypt,
+ 			},
+ 		},
++	} */
++	{
++		.base = {
++			.cra_name = "cbc(des3_ede)",
++			.cra_driver_name = "nss-cbc-des-ede",
++			.cra_priority = 10000,
++			.cra_flags = CRYPTO_ALG_ASYNC,
++			.cra_blocksize = DES3_EDE_BLOCK_SIZE,
++			.cra_ctxsize = sizeof(struct nss_cryptoapi_ctx),
++			.cra_alignmask = 0,
++			//.cra_type = &crypto_skcipher_type,
++			.cra_module = THIS_MODULE,
++		},
++		.init = nss_cryptoapi_skcipher_init,
++		.exit = nss_cryptoapi_skcipher_exit,
++		.ivsize = DES3_EDE_BLOCK_SIZE,
++		.min_keysize = DES3_EDE_KEY_SIZE,
++		.max_keysize = DES3_EDE_KEY_SIZE,
++		.setkey = nss_cryptoapi_skc_setkey,
++		.encrypt = nss_cryptoapi_skc_encrypt,
++		.decrypt = nss_cryptoapi_skc_decrypt,
+ 	}
+ };
+ 
+@@ -1492,7 +1583,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = MD5_HMAC_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1518,7 +1609,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA1_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1544,7 +1635,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA224_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1570,7 +1661,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA256_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1596,7 +1687,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA384_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1622,7 +1713,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA512_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1652,7 +1743,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = MD5_HMAC_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1678,7 +1769,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA1_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1704,7 +1795,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA224_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1730,7 +1821,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA256_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1756,7 +1847,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA384_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -1782,7 +1873,7 @@ static struct ahash_alg cryptoapi_ahash_
+ 				.cra_blocksize   = SHA512_BLOCK_SIZE,
+ 				.cra_ctxsize     = sizeof(struct nss_cryptoapi_ctx),
+ 				.cra_alignmask   = 0,
+-				.cra_type        = &crypto_ahash_type,
++				//.cra_type        = &crypto_ahash_type,
+ 				.cra_module      = THIS_MODULE,
+ 				.cra_init        = nss_cryptoapi_ahash_cra_init,
+ 				.cra_exit        = nss_cryptoapi_ahash_cra_exit,
+@@ -2187,7 +2278,8 @@ void nss_cryptoapi_add_ctx2debugfs(struc
+  */
+ void nss_cryptoapi_attach_user(void *app_data, struct nss_crypto_user *user)
+ {
+-	struct crypto_alg *ablk = cryptoapi_ablkcipher_algs;
++	//struct crypto_alg *ablk = cryptoapi_skcipher_algs;
++	struct skcipher_alg *ablk = cryptoapi_skcipher_algs;
+ 	struct aead_alg *aead = cryptoapi_aead_algs;
+ 	struct ahash_alg *ahash = cryptoapi_ahash_algs;
+ 	struct nss_cryptoapi *sc = app_data;
+@@ -2210,14 +2302,15 @@ void nss_cryptoapi_attach_user(void *app
+ 		      g_cryptoapi.user = user;
+ 	}
+ 
+-	for (i = 0; enable_ablk && (i < ARRAY_SIZE(cryptoapi_ablkcipher_algs)); i++, ablk++) {
+-		info = nss_cryptoapi_cra_name_lookup(ablk->cra_name);
++	for (i = 0; enable_ablk && (i < ARRAY_SIZE(cryptoapi_skcipher_algs)); i++, ablk++) {
++		info = nss_cryptoapi_cra_name_lookup(ablk->base.cra_name);
+ 		if(!info || !nss_crypto_algo_is_supp(info->algo))
+ 			continue;
+ 
+-		if (crypto_register_alg(ablk)) {
+-			nss_cfi_err("%px: ABLK registration failed(%s)\n", sc, ablk->cra_name);
+-			ablk->cra_flags = 0;
++		//if (crypto_register_alg(ablk)) {
++		if (crypto_register_skcipher(ablk)) {
++			nss_cfi_err("%px: ABLK registration failed(%s)\n", sc, ablk->base.cra_name);
++			ablk->base.cra_flags = 0;
+ 		}
+ 	}
+ 
+@@ -2255,7 +2348,8 @@ void nss_cryptoapi_attach_user(void *app
+  */
+ void nss_cryptoapi_detach_user(void *app_data, struct nss_crypto_user *user)
+ {
+-	struct crypto_alg *ablk = cryptoapi_ablkcipher_algs;
++	//struct crypto_alg *ablk = cryptoapi_skcipher_algs;
++	struct skcipher_alg *ablk = cryptoapi_skcipher_algs;
+ 	struct aead_alg *aead = cryptoapi_aead_algs;
+ 	struct ahash_alg *ahash = cryptoapi_ahash_algs;
+ 	struct nss_cryptoapi *sc = app_data;
+@@ -2268,12 +2362,14 @@ void nss_cryptoapi_detach_user(void *app
+ 	 */
+ 	atomic_set(&g_cryptoapi.registered, 0);
+ 
+-	for (i = 0; enable_ablk && (i < ARRAY_SIZE(cryptoapi_ablkcipher_algs)); i++, ablk++) {
+-		if (!ablk->cra_flags)
++	for (i = 0; enable_ablk && (i < ARRAY_SIZE(cryptoapi_skcipher_algs)); i++, ablk++) {
++		if (!ablk->base.cra_flags)
+ 			continue;
+ 
+-		crypto_unregister_alg(ablk);
+-		nss_cfi_info("%px: ABLK unregister succeeded, algo: %s\n", sc, ablk->cra_name);
++		//crypto_unregister_alg(ablk);
++		crypto_unregister_skcipher(ablk);
++
++		nss_cfi_info("%px: ABLK unregister succeeded, algo: %s\n", sc, ablk->base.cra_name);
+ 	}
+ 
+ 	for (i = 0; enable_aead && (i < ARRAY_SIZE(cryptoapi_aead_algs)); i++, aead++) {
+--- a/cryptoapi/v2.0/nss_cryptoapi_aead.c
++++ b/cryptoapi/v2.0/nss_cryptoapi_aead.c
+@@ -100,7 +100,8 @@ int nss_cryptoapi_aead_init(struct crypt
+ 	ctx->sid = NSS_CRYPTO_SESSION_MAX;
+ 	init_completion(&ctx->complete);
+ 
+-	need_fallback = crypto_tfm_alg_flags(tfm) & CRYPTO_ALG_NEED_FALLBACK;
++	//need_fallback = crypto_tfm_alg_flags(tfm) & CRYPTO_ALG_NEED_FALLBACK;
++	need_fallback = crypto_tfm_get_flags(tfm) & CRYPTO_ALG_NEED_FALLBACK;
+ 	if (!need_fallback)
+ 		return 0;
+ 
+@@ -201,7 +202,7 @@ int nss_cryptoapi_aead_setkey_noauth(str
+ 	ctx->info = nss_cryptoapi_cra_name2info(crypto_tfm_alg_name(tfm), keylen, 0);
+ 	if (!ctx->info) {
+ 		nss_cfi_err("%px: Unable to find algorithm with keylen\n", ctx);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -ENOENT;
+ 	}
+ 
+@@ -233,7 +234,7 @@ int nss_cryptoapi_aead_setkey_noauth(str
+ 	status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
+ 	if (status < 0) {
+ 		nss_cfi_err("%px: Unable to allocate crypto session(%d)\n", ctx, status);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_FLAGS);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_FLAGS);
+ 		return status;
+ 	}
+ 
+@@ -265,14 +266,14 @@ int nss_cryptoapi_aead_setkey(struct cry
+ 	 */
+ 	if (crypto_authenc_extractkeys(&keys, key, keylen) != 0) {
+ 		nss_cfi_err("%px: Unable to extract keys\n", ctx);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -EIO;
+ 	}
+ 
+ 	ctx->info = nss_cryptoapi_cra_name2info(crypto_tfm_alg_name(tfm), keys.enckeylen, crypto_aead_maxauthsize(aead));
+ 	if (!ctx->info) {
+ 		nss_cfi_err("%px: Unable to find algorithm with keylen\n", ctx);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -ENOENT;
+ 	}
+ 
+@@ -293,7 +294,7 @@ int nss_cryptoapi_aead_setkey(struct cry
+ 	 */
+ 	if (keys.authkeylen > ctx->info->auth_blocksize) {
+ 		nss_cfi_err("%px: Auth keylen(%d) exceeds supported\n", ctx, keys.authkeylen);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -336,7 +337,7 @@ int nss_cryptoapi_aead_setkey(struct cry
+ 	status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
+ 	if (status < 0) {
+ 		nss_cfi_err("%px: Unable to allocate crypto session(%d)\n", ctx, status);
+-		crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_FLAGS);
++		//crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_FLAGS);
+ 		return status;
+ 	}
+ 
+--- a/cryptoapi/v2.0/nss_cryptoapi_ahash.c
++++ b/cryptoapi/v2.0/nss_cryptoapi_ahash.c
+@@ -191,7 +191,7 @@ int nss_cryptoapi_ahash_setkey(struct cr
+ 
+ 	ctx->info = nss_cryptoapi_cra_name2info(crypto_tfm_alg_name(tfm), 0, crypto_ahash_digestsize(ahash));
+ 	if (!ctx->info) {
+-		crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
++		//crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -214,7 +214,7 @@ int nss_cryptoapi_ahash_setkey(struct cr
+ 	status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
+ 	if (status < 0) {
+ 		nss_cfi_warn("%px: Unable to allocate crypto session(%d)\n", ctx, status);
+-		crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
++		//crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
+ 		return status;
+ 	}
+ 
+@@ -298,7 +298,7 @@ int nss_cryptoapi_ahash_init(struct ahas
+ 		 */
+ 		ctx->info = nss_cryptoapi_cra_name2info(crypto_tfm_alg_name(tfm), 0, 0);
+ 		if (!ctx->info) {
+-			crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
++			//crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_KEY_LEN);
+ 			return -EINVAL;
+ 		}
+ 
+@@ -313,7 +313,7 @@ int nss_cryptoapi_ahash_init(struct ahas
+ 		status = nss_crypto_session_alloc(ctx->user, &data, &ctx->sid);
+ 		if (status < 0) {
+ 			nss_cfi_err("%px: Unable to allocate crypto session(%d)\n", ctx, status);
+-			crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
++			//crypto_ahash_set_flags(ahash, CRYPTO_TFM_RES_BAD_FLAGS);
+ 			return status;
+ 		}
+ 
